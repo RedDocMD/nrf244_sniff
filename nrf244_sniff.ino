@@ -18,9 +18,9 @@ uint8_t msg[32];
 // These bytes will be found out in the preamble of the packet,
 // and can be used to confuse the chip to read this as MAC addr.
 // Another alternate preamble is 0x0055.
-// uint8_t addr[2] = {0x00, 0xAA};
+uint8_t addr[2] = {0xAA, 0x00};
 // uint8_t addr[3] = {0xCD, 0x34, 0xDA};
-uint8_t addr[5] = {0xCD, 0x02, 0x03, 0x04, 0x05};
+// uint8_t addr[5] = {0xCD, 0x02, 0x03, 0x04, 0x05};
 
 void wait_forever() {
   while (true)
@@ -67,11 +67,17 @@ void setup() {
   while (true) {
     if (rf.available()) {
       rf.read(msg, sizeof(msg));
-      printf("Read msg: ");
-      printMsg();
-      printf("\n");
+      int zero_cnt = 0;
+      for (int i = 0; i < sizeof(msg); i++) {
+        zero_cnt += (msg[i] == 0x00);
+      }
+      if (zero_cnt > 16) {
+        printf("Read msg: ");
+        printMsg();
+        printf("\n");
+      }
     }
-    delay(500);
+    // delay(500);
   }
 }
 
