@@ -3,12 +3,12 @@
 #include <nRF24L01.h>
 #include <LibPrintf.h>
 #include <SPI.h>
+#include <Gaussian.h>
 
 const int CE = 7;
 const int CSN = 8;
 
-// TODO: Iterate over different channels
-int channel = 34;
+int channel = 3;
 
 RF24 rf(CE, CSN);
 
@@ -22,6 +22,25 @@ uint8_t addr[2] = {0xAA, 0x00};
 // uint8_t addr[3] = {0xCD, 0x34, 0xDA};
 // uint8_t addr[5] = {0xCD, 0x02, 0x03, 0x04, 0x05};
 
+struct Payload {
+  uint8_t dev_type;
+  uint8_t pkt_type;
+  uint8_t model;
+  uint8_t _unk;
+  uint16_t seq;
+  uint8_t flags;
+  uint8_t meta;
+  uint8_t _pad1;
+  uint8_t hid_code;
+  uint8_t _pad2[5];
+  uint8_t cksum;
+};
+
+struct __attribute__((packed)) Message {
+  uint8_t addr[5]; // In big-endian
+  Payload pay;
+};
+
 void wait_forever() {
   while (true)
     asm volatile ("wfe");
@@ -34,6 +53,12 @@ void printMsg() {
     printf("%02x", msg[i]);
   }
   printf("]");
+}
+
+void print_addr(Message *mess) {
+  uint8_t *a = mess->addr;
+  printf("MAC addr: %02x:%02x:%02x:%02x:%02x\n",
+    a[0], a[1], a[2], a[3], a[4]);
 }
 
 void write_register(uint8_t reg, uint8_t val) {
@@ -55,7 +80,6 @@ void setup() {
   rf.setPALevel(RF24_PA_MIN);
   rf.setDataRate(RF24_2MBPS);
   rf.setPayloadSize(sizeof(msg));
-  rf.setChannel(channel);
 
   rf.setAddressWidth(sizeof(addr));
   write_register(0x02, 0x00);
@@ -64,20 +88,34 @@ void setup() {
   rf.startListening();
   rf.printDetails();
 
+  long time = 0;
+  constexpr long CHANNEL_WAIT = 500;
+  constexpr long CHANNEL_WAIT_DEV = 15;
+  Gaussian wait_distr(CHANNEL_WAIT, CHANNEL_WAIT_DEV);
+
   while (true) {
-    if (rf.available()) {
-      rf.read(msg, sizeof(msg));
-      int zero_cnt = 0;
-      for (int i = 0; i < sizeof(msg); i++) {
-        zero_cnt += (msg[i] == 0x00);
-      }
-      if (zero_cnt > 16) {
-        printf("Read msg: ");
-        printMsg();
-        printf("\n");
+    if (channel > 80) channel = 3;
+    
+    printf("Tuning to channel: %d\n", channel);
+    rf.setChannel(channel);
+
+    time = millis();
+    long wait = wait_distr.random();
+    while (millis() - time < wait) {
+      if (rf.available()) {
+        rf.read(msg, sizeof(msg));
+        Message *mess = (Message *)msg;
+        Payload *pay = &mess->pay;
+        if (pay->model == 0x06 && pay->dev_type == 0x0A) {
+          printf("Found keyboard on channel: %d\n", channel);
+          print_addr(mess);
+          printf("Took %ld ms to find keyboard\n", millis());
+          return;
+        }
       }
     }
-    // delay(500);
+
+    ++channel;
   }
 }
 
