@@ -4,11 +4,10 @@
 #include <LibPrintf.h>
 #include <SPI.h>
 #include <Gaussian.h>
+#include <algorithm>
 
 const int CE = 7;
 const int CSN = 8;
-
-int channel = 3;
 
 RF24 rf(CE, CSN);
 
@@ -68,6 +67,38 @@ void write_register(uint8_t reg, uint8_t val) {
   SPI.endTransaction();
 }
 
+void print_result(Message *mess, int chan, long time) {
+  printf("{");
+  printf("\"channel\": %d", chan);
+  printf(",");
+  printf("\"time\": %ld", time);
+  printf(",");
+  uint8_t *a = mess->addr;
+  printf("\"mac\": \"%02x:%02x:%02x:%02x:%02x\"",
+    a[0], a[1], a[2], a[3], a[4]);
+  printf("}\n\n");
+}
+
+#define CHAN_MIN 3
+#define CHAN_MAX 80
+#define CHAN_CNT (CHAN_MAX - CHAN_MIN + 1)
+
+int channels[CHAN_CNT];
+
+int uniform(int m) {
+  return random() % m;
+}
+
+void permute_channels() {
+  int chan = CHAN_MIN;
+  for (int i = 0; i < CHAN_CNT; i++)
+    channels[i] = chan++;
+  for (int i = 0; i < CHAN_CNT - 2; i++) {
+    int j = i + uniform(CHAN_CNT - i);
+    std::swap(channels[i], channels[j]);
+  }
+}
+
 void setup() {
   Serial.begin(9600);
 
@@ -86,18 +117,23 @@ void setup() {
   rf.openReadingPipe(0, addr);
   rf.disableCRC();
   rf.startListening();
-  rf.printDetails();
+  // rf.printDetails();
 
   long time = 0;
   constexpr long CHANNEL_WAIT = 500;
   constexpr long CHANNEL_WAIT_DEV = 15;
   Gaussian wait_distr(CHANNEL_WAIT, CHANNEL_WAIT_DEV);
 
+  int chan, chan_idx = 0;
   while (true) {
-    if (channel > 80) channel = 3;
+    if (chan_idx >= CHAN_CNT)
+      chan_idx = 0;
+    if (chan_idx == 0)
+      permute_channels();
+    chan = channels[chan_idx];
     
-    printf("Tuning to channel: %d\n", channel);
-    rf.setChannel(channel);
+    // printf("Tuning to channel: %d\n", chan);
+    rf.setChannel(chan);
 
     time = millis();
     long wait = wait_distr.random();
@@ -107,15 +143,18 @@ void setup() {
         Message *mess = (Message *)msg;
         Payload *pay = &mess->pay;
         if (pay->model == 0x06 && pay->dev_type == 0x0A) {
-          printf("Found keyboard on channel: %d\n", channel);
-          print_addr(mess);
-          printf("Took %ld ms to find keyboard\n", millis());
-          return;
+          // printf("Found keyboard on channel: %d\n", channel);
+          // print_addr(mess);
+          // printf("Took %ld ms to find keyboard\n", millis());
+          // return;
+          long time = millis();
+          print_result(mess, chan, time);
+          NVIC_SystemReset();
         }
       }
     }
 
-    ++channel;
+    ++chan_idx;
   }
 }
 
